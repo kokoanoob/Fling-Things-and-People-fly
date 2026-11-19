@@ -1,0 +1,623 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+if not player then
+	player = Players.PlayerAdded:Wait()
+end
+
+local playerGui = player:WaitForChild("PlayerGui")
+
+pcall(function()
+	local old = playerGui:FindFirstChild("FlyPanelGui_v5")
+	if old then
+		old:Destroy()
+	end
+end)
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FlyPanelGui_v5"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 999999
+screenGui.Parent = playerGui
+
+-- 文字色・フォントプリセット
+local textColors = {
+	{ name = "白", color = Color3.fromRGB(255, 255, 255) },
+	{ name = "黄", color = Color3.fromRGB(255, 230, 120) },
+	{ name = "水", color = Color3.fromRGB(120, 220, 255) },
+	{ name = "緑", color = Color3.fromRGB(130, 255, 160) },
+	{ name = "桃", color = Color3.fromRGB(255, 150, 200) },
+}
+
+local fontPresets = {
+	{ name = "GothamBold", font = Enum.Font.GothamBold },
+	{ name = "GothamMedium", font = Enum.Font.GothamMedium },
+	{ name = "FredokaOne", font = Enum.Font.FredokaOne },
+	{ name = "Code", font = Enum.Font.Code },
+	{ name = "SourceSansBold", font = Enum.Font.SourceSansBold },
+}
+
+local currentColorIndex = 1
+local currentFontIndex = 1
+local autoRainbow = true
+local rainbowHue = 0
+local rainbowSpeed = 0.25
+
+-- 1. 感謝テキスト
+local welcomeLabel = Instance.new("TextLabel")
+welcomeLabel.Name = "WelcomeLabel"
+welcomeLabel.Size = UDim2.new(0.85, 0, 0.16, 0)
+welcomeLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+welcomeLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+welcomeLabel.BackgroundTransparency = 1
+welcomeLabel.Text = "ご活用してくださりありがとうございます"
+welcomeLabel.TextColor3 = textColors[currentColorIndex].color
+welcomeLabel.TextScaled = true
+welcomeLabel.Font = fontPresets[currentFontIndex].font
+welcomeLabel.TextTransparency = 0
+welcomeLabel.ZIndex = 100
+welcomeLabel.Parent = screenGui
+
+-- 2. 黒色パネル（画面内に収まりやすいサイズ・ドラッグ移動可能）
+local panel = Instance.new("Frame")
+panel.Name = "ControlPanel"
+panel.Size = UDim2.new(0.54, 0, 0.68, 0)
+panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+panel.AnchorPoint = Vector2.new(0.5, 0.5)
+panel.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+panel.BorderSizePixel = 0
+panel.Visible = false
+panel.Active = true
+panel.ZIndex = 50
+panel.Parent = screenGui
+
+local panelCorner = Instance.new("UICorner")
+panelCorner.CornerRadius = UDim.new(0, 10)
+panelCorner.Parent = panel
+
+local header = Instance.new("TextLabel")
+header.Size = UDim2.new(1, 0, 0.12, 0)
+header.Position = UDim2.new(0, 0, 0, 0)
+header.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+header.BorderSizePixel = 0
+header.Text = "≡ ドラッグで移動"
+header.TextColor3 = Color3.fromRGB(230, 230, 230)
+header.TextScaled = true
+header.Font = Enum.Font.GothamMedium
+header.ZIndex = 51
+header.Parent = panel
+
+-- 最小化ボタン（右上）
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeButton"
+minimizeBtn.Size = UDim2.new(0, 36, 0, 32)
+minimizeBtn.Position = UDim2.new(1, -42, 0, 5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(65, 65, 65)
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Text = "－"
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.TextScaled = true
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.ZIndex = 53
+minimizeBtn.Parent = panel
+
+-- 最小化中に表示する黒い丸型アイコン
+local miniIcon = Instance.new("TextButton")
+miniIcon.Name = "MiniRestoreIcon"
+miniIcon.Size = UDim2.new(0, 64, 0, 64)
+miniIcon.Position = UDim2.new(0, 20, 0, 100)
+miniIcon.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+miniIcon.BorderSizePixel = 0
+miniIcon.Text = ""
+miniIcon.Visible = false
+miniIcon.Active = true
+miniIcon.AutoButtonColor = true
+miniIcon.ZIndex = 200
+miniIcon.Parent = screenGui
+
+local miniCorner = Instance.new("UICorner")
+miniCorner.CornerRadius = UDim.new(1, 0)
+miniCorner.Parent = miniIcon
+
+minimizeBtn.Activated:Connect(function()
+	panel.Visible = false
+	miniIcon.Visible = true
+end)
+
+-- アイコンを押すとパネルを再表示。アイコン自体はドラッグ可能
+local iconDragging = false
+local iconMoved = false
+local iconDragStart = Vector2.new(0, 0)
+local iconStartPos = miniIcon.Position
+local iconActiveInput = nil
+
+miniIcon.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		iconDragging = true
+		iconMoved = false
+		iconDragStart = Vector2.new(input.Position.X, input.Position.Y)
+		iconStartPos = miniIcon.Position
+		iconActiveInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if not iconDragging then return end
+
+	local isMouseMove = input.UserInputType == Enum.UserInputType.MouseMovement
+	local isTouchMove = iconActiveInput and input == iconActiveInput
+	if isMouseMove or isTouchMove then
+		local current = Vector2.new(input.Position.X, input.Position.Y)
+		local delta = current - iconDragStart
+		if delta.Magnitude > 5 then
+			iconMoved = true
+		end
+		miniIcon.Position = UDim2.new(
+			iconStartPos.X.Scale, iconStartPos.X.Offset + delta.X,
+			iconStartPos.Y.Scale, iconStartPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if iconDragging and (
+		input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+	) then
+		iconDragging = false
+		iconActiveInput = nil
+	end
+end)
+
+miniIcon.Activated:Connect(function()
+	if iconMoved then
+		iconMoved = false
+		return
+	end
+	miniIcon.Visible = false
+	panel.Visible = true
+end)
+
+-- 飛行 ON/OFF（スティック連動）
+local flying = false
+local flySpeed = 60
+local minFlySpeed = 5
+local maxFlySpeed = 500
+local speedStep = 10
+
+local flyBtn = Instance.new("TextButton")
+flyBtn.Size = UDim2.new(0.86, 0, 0.12, 0)
+flyBtn.Position = UDim2.new(0.5, 0, 0.20, 0)
+flyBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+flyBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+flyBtn.TextColor3 = textColors[currentColorIndex].color
+flyBtn.Text = "飛行: OFF"
+flyBtn.TextScaled = true
+flyBtn.Font = fontPresets[currentFontIndex].font
+flyBtn.ZIndex = 51
+flyBtn.Parent = panel
+
+-- 飛行スピード調整エリア（[-] [数値入力] [+]）
+local speedRow = Instance.new("Frame")
+speedRow.Name = "FlySpeedRow"
+speedRow.Size = UDim2.new(0.86, 0, 0.12, 0)
+speedRow.Position = UDim2.new(0.5, 0, 0.34, 0)
+speedRow.AnchorPoint = Vector2.new(0.5, 0.5)
+speedRow.BackgroundTransparency = 1
+speedRow.ZIndex = 51
+speedRow.Parent = panel
+
+local speedDownBtn = Instance.new("TextButton")
+speedDownBtn.Name = "SpeedDownButton"
+speedDownBtn.Size = UDim2.new(0.18, 0, 1, 0)
+speedDownBtn.Position = UDim2.new(0, 0, 0, 0)
+speedDownBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+speedDownBtn.TextColor3 = textColors[currentColorIndex].color
+speedDownBtn.Text = "-"
+speedDownBtn.TextScaled = true
+speedDownBtn.Font = fontPresets[currentFontIndex].font
+speedDownBtn.ZIndex = 52
+speedDownBtn.Parent = speedRow
+
+local speedBox = Instance.new("TextBox")
+speedBox.Name = "SpeedInputBox"
+speedBox.Size = UDim2.new(0.60, 0, 1, 0)
+speedBox.Position = UDim2.new(0.20, 0, 0, 0)
+speedBox.BackgroundColor3 = Color3.fromRGB(32, 32, 32)
+speedBox.TextColor3 = textColors[currentColorIndex].color
+speedBox.Text = "速度: " .. tostring(flySpeed)
+speedBox.PlaceholderText = "速度を入力"
+speedBox.TextScaled = true
+speedBox.Font = fontPresets[currentFontIndex].font
+speedBox.ClearTextOnFocus = true
+speedBox.ZIndex = 52
+speedBox.Parent = speedRow
+
+local speedUpBtn = Instance.new("TextButton")
+speedUpBtn.Name = "SpeedUpButton"
+speedUpBtn.Size = UDim2.new(0.18, 0, 1, 0)
+speedUpBtn.Position = UDim2.new(0.82, 0, 0, 0)
+speedUpBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+speedUpBtn.TextColor3 = textColors[currentColorIndex].color
+speedUpBtn.Text = "+"
+speedUpBtn.TextScaled = true
+speedUpBtn.Font = fontPresets[currentFontIndex].font
+speedUpBtn.ZIndex = 52
+speedUpBtn.Parent = speedRow
+
+local function setFlySpeed(newSpeed)
+	if type(newSpeed) ~= "number" or newSpeed ~= newSpeed then
+		speedBox.Text = "速度: " .. tostring(flySpeed)
+		return
+	end
+	flySpeed = math.clamp(math.floor(newSpeed + 0.5), minFlySpeed, maxFlySpeed)
+	speedBox.Text = "速度: " .. tostring(flySpeed)
+end
+
+speedDownBtn.MouseButton1Click:Connect(function()
+	setFlySpeed(flySpeed - speedStep)
+end)
+
+speedUpBtn.MouseButton1Click:Connect(function()
+	setFlySpeed(flySpeed + speedStep)
+end)
+
+speedBox.FocusLost:Connect(function()
+	local raw = string.gsub(speedBox.Text, "[^0-9%.]", "")
+	local num = tonumber(raw)
+	if num then
+		setFlySpeed(num)
+	else
+		speedBox.Text = "速度: " .. tostring(flySpeed)
+	end
+end)
+
+local tpBtn = Instance.new("TextButton")
+tpBtn.Size = UDim2.new(0.86, 0, 0.12, 0)
+tpBtn.Position = UDim2.new(0.5, 0, 0.48, 0)
+tpBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+tpBtn.BackgroundColor3 = Color3.fromRGB(55, 110, 205)
+tpBtn.TextColor3 = textColors[currentColorIndex].color
+tpBtn.Text = "三人称: OFF"
+tpBtn.TextScaled = true
+tpBtn.Font = fontPresets[currentFontIndex].font
+tpBtn.ZIndex = 51
+tpBtn.Parent = panel
+
+local noclipBtn = Instance.new("TextButton")
+noclipBtn.Size = UDim2.new(0.86, 0, 0.12, 0)
+noclipBtn.Position = UDim2.new(0.5, 0, 0.62, 0)
+noclipBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+noclipBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+noclipBtn.TextColor3 = textColors[currentColorIndex].color
+noclipBtn.Text = "ノークリップ: OFF"
+noclipBtn.TextScaled = true
+noclipBtn.Font = fontPresets[currentFontIndex].font
+noclipBtn.ZIndex = 51
+noclipBtn.Parent = panel
+
+-- 文字色・フォント変更エリア（横並び2ボタン）
+local styleRow = Instance.new("Frame")
+styleRow.Name = "StyleRow"
+styleRow.Size = UDim2.new(0.86, 0, 0.13, 0)
+styleRow.Position = UDim2.new(0.5, 0, 0.78, 0)
+styleRow.AnchorPoint = Vector2.new(0.5, 0.5)
+styleRow.BackgroundTransparency = 1
+styleRow.ZIndex = 51
+styleRow.Parent = panel
+
+local colorBtn = Instance.new("TextButton")
+colorBtn.Name = "TextColorButton"
+colorBtn.Size = UDim2.new(0.48, 0, 1, 0)
+colorBtn.Position = UDim2.new(0, 0, 0, 0)
+colorBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 75)
+colorBtn.TextColor3 = textColors[currentColorIndex].color
+colorBtn.Text = "色: 自動"
+colorBtn.TextScaled = true
+colorBtn.Font = fontPresets[currentFontIndex].font
+colorBtn.ZIndex = 52
+colorBtn.Parent = styleRow
+
+local fontBtn = Instance.new("TextButton")
+fontBtn.Name = "FontButton"
+fontBtn.Size = UDim2.new(0.48, 0, 1, 0)
+fontBtn.Position = UDim2.new(0.52, 0, 0, 0)
+fontBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 75)
+fontBtn.TextColor3 = textColors[currentColorIndex].color
+fontBtn.Text = "字: " .. fontPresets[currentFontIndex].name
+fontBtn.TextScaled = true
+fontBtn.Font = fontPresets[currentFontIndex].font
+fontBtn.ZIndex = 52
+fontBtn.Parent = styleRow
+
+-- 対象テキスト一覧
+local styledLabels = {
+	welcomeLabel,
+	flyBtn,
+	speedDownBtn,
+	speedBox,
+	speedUpBtn,
+	tpBtn,
+	noclipBtn,
+	colorBtn,
+	fontBtn,
+}
+
+local function applyTextStyle()
+	local activeFont = fontPresets[currentFontIndex].font
+	local activeColor = autoRainbow and Color3.fromHSV(rainbowHue, 0.75, 1) or textColors[currentColorIndex].color
+	for _, obj in ipairs(styledLabels) do
+		if obj and obj.Parent then
+			obj.TextColor3 = activeColor
+			obj.Font = activeFont
+		end
+	end
+	if autoRainbow then
+		colorBtn.Text = "色: 自動"
+	else
+		colorBtn.Text = "色: " .. textColors[currentColorIndex].name
+	end
+	fontBtn.Text = "字: " .. fontPresets[currentFontIndex].name
+end
+
+colorBtn.MouseButton1Click:Connect(function()
+	if autoRainbow then
+		autoRainbow = false
+		currentColorIndex = 1
+	elseif currentColorIndex < #textColors then
+		currentColorIndex = currentColorIndex + 1
+	else
+		autoRainbow = true
+	end
+	applyTextStyle()
+end)
+
+fontBtn.MouseButton1Click:Connect(function()
+	currentFontIndex = (currentFontIndex % #fontPresets) + 1
+	applyTextStyle()
+end)
+
+applyTextStyle()
+
+-- ドラッグ移動（TextBox操作中はドラッグしない）
+local dragging = false
+local dragStart = Vector2.new(0, 0)
+local startPos = panel.Position
+
+panel.InputBegan:Connect(function(input)
+	if speedBox:IsFocused() then return end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = Vector2.new(input.Position.X, input.Position.Y)
+		startPos = panel.Position
+	end
+end)
+
+panel.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local dx = input.Position.X - dragStart.X
+		local dy = input.Position.Y - dragStart.Y
+		panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + dx, startPos.Y.Scale, startPos.Y.Offset + dy)
+	end
+end)
+
+-- 三人称 ON/OFF
+local thirdPerson = false
+local zoomDist = 14
+
+tpBtn.MouseButton1Click:Connect(function()
+	thirdPerson = not thirdPerson
+	pcall(function()
+		if thirdPerson then
+			tpBtn.Text = "三人称: ON"
+			tpBtn.BackgroundColor3 = Color3.fromRGB(45, 175, 85)
+			player.CameraMode = Enum.CameraMode.Classic
+			player.CameraMinZoomDistance = 2
+			player.CameraMaxZoomDistance = math.max(zoomDist + 6, 20)
+		else
+			tpBtn.Text = "三人称: OFF"
+			tpBtn.BackgroundColor3 = Color3.fromRGB(55, 110, 205)
+			player.CameraMode = Enum.CameraMode.Classic
+			player.CameraMinZoomDistance = 0.5
+			player.CameraMaxZoomDistance = 128
+		end
+	end)
+end)
+
+-- 二本指ピンチズーム
+local touches = {}
+local prevDist = nil
+
+local function getPinchDist()
+	local pts = {}
+	for _, pos in pairs(touches) do
+		table.insert(pts, pos)
+		if #pts == 2 then
+			break
+		end
+	end
+	if #pts < 2 then
+		return nil
+	end
+	return (pts[1] - pts[2]).Magnitude
+end
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		touches[input] = Vector2.new(input.Position.X, input.Position.Y)
+		prevDist = getPinchDist()
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch and touches[input] then
+		touches[input] = Vector2.new(input.Position.X, input.Position.Y)
+		local d = getPinchDist()
+		if d and prevDist then
+			local delta = d - prevDist
+			zoomDist = math.clamp(zoomDist - (delta * 0.05), 2, 70)
+			pcall(function()
+				if thirdPerson then
+					player.CameraMinZoomDistance = 2
+					player.CameraMaxZoomDistance = math.max(zoomDist + 5, 12)
+				else
+					player.CameraMinZoomDistance = math.clamp(zoomDist - 1.5, 0.5, 69)
+					player.CameraMaxZoomDistance = math.clamp(zoomDist + 1.5, 2, 70)
+				end
+			end)
+		end
+		prevDist = d
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		touches[input] = nil
+		prevDist = getPinchDist()
+	end
+end)
+
+-- ノークリップ ON/OFF
+local noClip = false
+local originalCollision = {}
+local noclipCharacter = nil
+
+noclipBtn.MouseButton1Click:Connect(function()
+	noClip = not noClip
+	if noClip then
+		noclipBtn.Text = "ノークリップ: ON"
+		noclipBtn.BackgroundColor3 = Color3.fromRGB(45, 175, 85)
+	else
+		noclipBtn.Text = "ノークリップ: OFF"
+		noclipBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+	end
+end)
+
+flyBtn.MouseButton1Click:Connect(function()
+	flying = not flying
+	pcall(function()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if flying then
+			flyBtn.Text = "飛行: ON"
+			flyBtn.BackgroundColor3 = Color3.fromRGB(45, 175, 85)
+			if hum then
+				hum.PlatformStand = true
+			end
+		else
+			flyBtn.Text = "飛行: OFF"
+			flyBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+			if hum then
+				hum.PlatformStand = false
+				hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+			end
+		end
+	end)
+end)
+
+-- 経過時間での演出進行 ＋ 飛行ループ
+local t0 = tick()
+local doneIntro = false
+
+RunService.Heartbeat:Connect(function(dt)
+	-- 文字色の自動変化（虹色グラデーション）
+	if autoRainbow then
+		rainbowHue = (rainbowHue + dt * rainbowSpeed) % 1
+		local autoColor = Color3.fromHSV(rainbowHue, 0.75, 1)
+		for _, obj in ipairs(styledLabels) do
+			if obj and obj.Parent then
+				obj.TextColor3 = autoColor
+			end
+		end
+	end
+
+	if not doneIntro then
+		local elapsed = tick() - t0
+		if elapsed >= 3.0 then
+			local p = (elapsed - 3.0) / 1.5
+			if p < 1 then
+				welcomeLabel.TextTransparency = p
+			else
+				welcomeLabel.Visible = false
+				panel.Visible = true
+				doneIntro = true
+			end
+		end
+	end
+
+	-- ノークリップ処理（飛行のON/OFFとは独立）
+	local currentCharacter = player.Character
+	if currentCharacter ~= noclipCharacter then
+		originalCollision = {}
+		noclipCharacter = currentCharacter
+	end
+
+	if currentCharacter then
+		if noClip then
+			for _, part in ipairs(currentCharacter:GetDescendants()) do
+				if part:IsA("BasePart") then
+					if originalCollision[part] == nil then
+						originalCollision[part] = part.CanCollide
+					end
+					part.CanCollide = false
+				end
+			end
+		else
+			for part, oldValue in pairs(originalCollision) do
+				if part and part.Parent then
+					part.CanCollide = oldValue
+				end
+			end
+			originalCollision = {}
+		end
+	end
+
+	if not flying then
+		return
+	end
+
+	pcall(function()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local cam = workspace.CurrentCamera
+		if not hum or not hrp or not cam then
+			return
+		end
+
+		hum.PlatformStand = true
+		local moveDir = hum.MoveDirection
+
+		if moveDir.Magnitude > 0.05 then
+			local camLook = cam.CFrame.LookVector
+			local camRight = cam.CFrame.RightVector
+			local rightComp = camRight * moveDir:Dot(camRight)
+
+			local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
+			if flatLook.Magnitude > 0.001 then
+				flatLook = flatLook.Unit
+			end
+			local fwdAmt = moveDir:Dot(flatLook)
+
+			local dir = (camLook * fwdAmt) + rightComp
+			if dir.Magnitude > 1 then
+				dir = dir.Unit
+			end
+
+			hrp.AssemblyLinearVelocity = dir * flySpeed
+			hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + cam.CFrame.LookVector)
+		else
+			hrp.AssemblyLinearVelocity = Vector3.new(0, workspace.Gravity * dt, 0)
+		end
+	end)
+end)
